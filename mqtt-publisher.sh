@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-CPU_CORES=2
+CPU_CORES=$(nproc 2>/dev/null || echo 2)
 
 MQTT_HOST=""
 MQTT_PORT=""
@@ -104,7 +104,8 @@ publish_stats()
             dl_avg_owd_delta_us = ul_avg_owd_delta_us = 0
             dl_load_condition = ul_load_condition = "unknown"
             cake_dl_rate_kbps = cake_ul_rate_kbps = 0
-            cpu_total = cpu_core0 = cpu_core1 = 0
+            cpu_total = 0
+            num_cores = 0
             summary_epoch = cpu_epoch = 0
         }
 
@@ -122,18 +123,22 @@ publish_stats()
             cake_ul_rate_kbps = $13
         }
 
-        $1=="CPU" && NF>=7 {
+        $1=="CPU" && NF>=6 {
             cpu_epoch = $3+0
             cpu_total = $5
-            cpu_core0 = $6
-            cpu_core1 = $7
+            if (num_cores == 0) num_cores = NF - 5
+            for (i = 0; i < num_cores; i++)
+                cpu_core[i] = $(6+i)
         }
 
         {
             event_epoch = (summary_epoch > cpu_epoch) ? summary_epoch : cpu_epoch
             if (event_epoch > 0 && event_epoch - last_emit >= min_int) {
                 last_emit = event_epoch
-                printf "{\"event_epoch\":%.6f,\"dl_achieved_rate_kbps\":%s,\"ul_achieved_rate_kbps\":%s,\"dl_sum_delays\":%s,\"ul_sum_delays\":%s,\"dl_avg_owd_delta_us\":%s,\"ul_avg_owd_delta_us\":%s,\"dl_load_condition\":\"%s\",\"ul_load_condition\":\"%s\",\"cake_dl_rate_kbps\":%s,\"cake_ul_rate_kbps\":%s,\"cpu_total\":%s,\"cpu_core0\":%s,\"cpu_core1\":%s}\n",
+                cpu_json = ""
+                for (i = 0; i < num_cores; i++)
+                    cpu_json = cpu_json sprintf(",\"cpu_core%d\":%s", i, cpu_core[i])
+                printf "{\"event_epoch\":%.6f,\"dl_achieved_rate_kbps\":%s,\"ul_achieved_rate_kbps\":%s,\"dl_sum_delays\":%s,\"ul_sum_delays\":%s,\"dl_avg_owd_delta_us\":%s,\"ul_avg_owd_delta_us\":%s,\"dl_load_condition\":\"%s\",\"ul_load_condition\":\"%s\",\"cake_dl_rate_kbps\":%s,\"cake_ul_rate_kbps\":%s,\"cpu_total\":%s%s}\n",
                     event_epoch,
                     dl_achieved_rate_kbps,
                     ul_achieved_rate_kbps,
@@ -146,14 +151,8 @@ publish_stats()
                     cake_dl_rate_kbps,
                     cake_ul_rate_kbps,
                     cpu_total,
-                    cpu_core0,
-<<<<<<< fix/mqtt-publisher-cpu-labels
-                    cpu_core1
-=======
-                    cpu_core1,
-                    cpu_core2
+                    cpu_json
                 fflush("")
->>>>>>> master
             }
         }
         ' | mosquitto_pub \
